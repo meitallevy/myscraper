@@ -63,7 +63,7 @@ def fetch_url(url, max_retries=10):
 
 def parse_makers(html):
     soup = BeautifulSoup(html, "html.parser")
-    makers_div = soup.find("div", {"class": "st-text"})
+    makers_div = soup.find("div",                                                                                                                                                                                                                                                                                                                                                                                                                                                                   {"class": "st-text"})
     makers = []
     if makers_div:
         for a in makers_div.find_all("a"):
@@ -86,12 +86,28 @@ def parse_models(html):
                 models.append((model_name, model_link))
     return models
 
+def parse_params(html, specific_params=None):
+    params_dict ={}
+    soup = BeautifulSoup(html, "html.parser")
+    specs_table = soup.find('div', {"id": "specs-list"})
+    if specs_table:
+        trs = specs_table.find_all("tr")
+        for tr in trs:
+            if tr:
+                spec_tag = tr.find("td", {"class":"ttl"})
+                if spec_tag:
+                    spec = spec_tag.find("a")
+                    if spec:
+                        if (not specific_params) or spec.contents in specific_params:
+                            params_dict[str(spec)] = str(tr.find("td", {"class":"nfo"}).contents)
+    return params_dict
+
 def parse_esim(html):
     soup = BeautifulSoup(html, "html.parser")
-
-    # Check if "eSIM" appears anywhere in the page
-    # TODO: Verify that there aren't any non supporting models with e-sim string on their site
-    return "esim" in soup.text.lower()
+    sim_td = soup.find("td", {"data-spec": "sim", "class":"nfo"})
+    if sim_td:
+        return "esim" in sim_td.text.lower(), sim_td.contents
+    return False, None
 
 def main():
     html_makers_table = fetch_url(MAKERS_URL)
@@ -101,7 +117,7 @@ def main():
     with open("gsmarena_models.csv", "w", newline="", encoding="utf-8") as csvfile:
         writer = csv.writer(csvfile)
         # Write header row to CSV
-        writer.writerow(["maker", "maker_link", "model_name", "model_link", "e-sim_support", "source"])
+        writer.writerow(["maker", "maker_link", "model_name", "model_link", "esim_support","sim_data", "source"])
 
         print(f"Found {len(makers)} makers:")
         for maker_name, maker_link in makers:
@@ -111,17 +127,21 @@ def main():
                 models = parse_models(html_maker)
                 for model_name, model_link in models:
                     html_model = fetch_url(model_link)
-                    esim_support = parse_esim(html_model)
+                    esim_support, sim_data = parse_esim(html_model)
+                    params = parse_params(html_model)
                     print(f"-- {model_name} | eSIM: {esim_support}")
-                    # Write each row with model data
-                    writer.writerow([
-                        maker_name,
-                        maker_link,
-                        model_name,
-                        model_link,
-                        esim_support,
-                        "GSMARENA"  # Hardcoded source column
-                    ])
+
+                    if esim_support:
+                        writer.writerow([
+                            maker_name,
+                            maker_link,
+                            model_name,
+                            model_link,
+                            esim_support,
+                            sim_data,
+                            "GSMARENA",  # Hardcoded source column
+                            params
+                        ])
 
 if __name__ == "__main__":
     main()
