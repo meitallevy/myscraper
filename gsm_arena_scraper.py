@@ -87,20 +87,25 @@ def parse_models(html):
     return models
 
 def parse_params(html, specific_params=None):
-    params_dict ={}
+    params_dict = {}
     soup = BeautifulSoup(html, "html.parser")
     specs_table = soup.find('div', {"id": "specs-list"})
+    
     if specs_table:
         trs = specs_table.find_all("tr")
         for tr in trs:
-            if tr:
-                spec_tag = tr.find("td", {"class":"ttl"})
-                if spec_tag:
-                    spec = spec_tag.find("a")
-                    if spec:
-                        if (not specific_params) or spec.contents in specific_params:
-                            params_dict[str(spec)] = str(tr.find("td", {"class":"nfo"}).contents)
+            spec_tag = tr.find("td", {"class": "ttl"})
+            value_tag = tr.find("td", {"class": "nfo"})
+            if spec_tag and value_tag:
+                spec_name_tag = spec_tag.find("a")
+                if spec_name_tag:
+                    spec_name = spec_name_tag.get_text(strip=True)
+                    value = value_tag.get_text(separator=" ", strip=True)
+                    if (not specific_params) or (spec_name in specific_params):
+                        params_dict[spec_name] = value
+                        
     return params_dict
+
 
 def parse_esim(html):
     soup = BeautifulSoup(html, "html.parser")
