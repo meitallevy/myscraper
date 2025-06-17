@@ -103,7 +103,10 @@ def parse_makers(html):
     makers = []
     if makers_div:
         for a in makers_div.find_all("a"):
-            name = a.text.strip()
+            span = a.find("span")
+            if span:
+                span.extract()  # Remove the <span> so it doesn't pollute .text
+            name = a.text.strip().replace('\n', '')  # Clean linebreaks just in case
             href = a.get("href")
             if href:
                 makers.append((name, BASE_URL + href))
