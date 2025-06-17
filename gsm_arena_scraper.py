@@ -7,8 +7,7 @@ from stem import Signal
 from stem.control import Controller
 
 # Whitelist of specific vendors we're interested in
-# VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel']
-VENDORS_WHITELIST = ['itel']
+VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel']
 
 # Tor proxy and control port config
 SOCKS_PROXY = "socks5h://127.0.0.1:9050"
@@ -48,7 +47,9 @@ CREATE TABLE IF NOT EXISTS models_view (
     model_name TEXT,
     model_link TEXT,
     esim_support INTEGER,
-    sim_data TEXT
+    sim_data TEXT,
+    is_android INTEGER,
+    os_data TEXT
 )
 """)
 
@@ -135,17 +136,12 @@ def parse_params(html, specific_params=None):
     if specs_table:
         trs = specs_table.find_all("tr")
         for tr in trs:
-            spec_tag = tr.find("td", {"class": "ttl"})
             value_tag = tr.find("td", {"class": "nfo"})
-            if spec_tag and value_tag:
-                spec_name_tag = spec_tag.find("a")
-                if spec_name_tag:
-                    spec_name = spec_name_tag.get_text(strip=True)
-                    value = value_tag.get_text(separator=" ", strip=True)
-                    if (not specific_params) or (spec_name in specific_params):
-                        params_dict[spec_name] = value
-                else:
-                    print("no a tag in tr" + tr.text)
+            if value_tag:
+                spec_name = value_tag.get('data-spec')
+                value = value_tag.get_text(separator=" ", strip=True)
+                if (not specific_params) or (spec_name in specific_params):
+                    params_dict[spec_name] = value
             else:
                 print(tr.text + "is missing ttl and nfo")
 
@@ -157,6 +153,14 @@ def parse_esim(html):
     sim_td = soup.find("td", {"data-spec": "sim", "class": "nfo"})
     if sim_td:
         return "esim" in sim_td.text.lower(), sim_td.text.strip()
+    return False, None
+
+
+def parse_os(html):
+    soup = BeautifulSoup(html, "html.parser")
+    os_td = soup.find("td", {"data-spec": "os", "class": "nfo"})
+    if os_td:
+        return "android" in os_td.text.lower(), os_td.text.strip()
     return False, None
 
 
@@ -173,8 +177,9 @@ def main():
             for model_name, model_link in models:
                 html_model = fetch_url(model_link)
                 esim_support, sim_data = parse_esim(html_model)
+                is_android, os_data = parse_os(html_model)
                 params = parse_params(html_model)
-                print(f"-- {model_name} | eSIM: {esim_support}")
+                print(f"-- {model_name} | os: {os_data}")
 
                 # Generate a unique ID for this model
                 unique_model_id = str(uuid.uuid4())
@@ -183,11 +188,12 @@ def main():
                 c.execute("""
                     INSERT INTO models_view (
                         unique_model_id, maker, maker_link,
-                        model_name, model_link, esim_support, sim_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        model_name, model_link, esim_support, sim_data,
+                        is_android, os_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     unique_model_id, maker_name, maker_link,
-                    model_name, model_link, int(esim_support), sim_data
+                    model_name, model_link, int(esim_support), sim_data, int(is_android), os_data
                 ))
 
                 # Save parameters to models_params table
