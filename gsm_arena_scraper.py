@@ -1,12 +1,15 @@
+import random
 import time
-import csv
 import requests
+import sqlite3
+import uuid
 from bs4 import BeautifulSoup
 from stem import Signal
 from stem.control import Controller
 
 # Whitelist of specific vendors we're interested in
-VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel']
+# VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel', 'google', 'honor', 'htc','nothing', 'oppo', 'oneplus']
+VENDORS_WHITELIST = list('abcdefghijklmnopqrstuvwxyz')
 
 # Tor proxy and control port config
 SOCKS_PROXY = "socks5h://127.0.0.1:9050"
@@ -33,6 +36,39 @@ proxies = {
     "https": SOCKS_PROXY,
 }
 
+# SQLite DB setup (creates a file named gsmarena.db)
+conn = sqlite3.connect("gsmarena.db")
+c = conn.cursor()
+
+# Create main table for models
+c.execute("""
+CREATE TABLE IF NOT EXISTS models_view (
+    unique_model_id TEXT PRIMARY KEY,
+    maker TEXT,
+    maker_link TEXT,
+    model_name TEXT,
+    model_link TEXT,
+    esim_support INTEGER,
+    sim_data TEXT,
+    is_android INTEGER,
+    os_data TEXT
+)
+""")
+
+# Create separate table for parameters
+c.execute("""
+CREATE TABLE IF NOT EXISTS models_params (
+    unique_model_id TEXT,
+    maker TEXT,
+    model_name TEXT,
+    param_name TEXT,
+    param_value TEXT,
+    FOREIGN KEY (unique_model_id) REFERENCES models_view(unique_model_id)
+)
+""")
+conn.commit()
+
+
 # Change my IP
 def renew_tor_identity():
     print("Requesting new Tor identity")
@@ -42,9 +78,10 @@ def renew_tor_identity():
         # Signal request for renewal of identity
         controller.signal(Signal.NEWNYM)
     print("New identity requested, waiting 10 seconds")
-    time.sleep(10)
+    time.sleep(15)
 
-def fetch_url(url, max_retries=10):
+
+def fetch_url(url, max_retries=50):
     for attempt in range(max_retries):
         try:
             print(f"Fetching {url} (Attempt {attempt})")
@@ -54,24 +91,29 @@ def fetch_url(url, max_retries=10):
                 renew_tor_identity()
                 continue
             response.raise_for_status()  # If any other error it will raise exception
-            time.sleep(1.5)  # random I chose for safety so that I won't get blocked frequently
+            time.sleep(random.randint(2,6))  # random I chose for safety so that I won't get blocked frequently
             return response.text
         except requests.RequestException as e:
             print(f"Request failed: {e}. Renewing identity and retrying")
             renew_tor_identity()
     raise Exception(f"Failed to fetch {url} after {max_retries} attempts")
 
+
 def parse_makers(html):
     soup = BeautifulSoup(html, "html.parser")
-    makers_div = soup.find("div",                                                                                                                                                                                                                                                                                                                                                                                                                                                                   {"class": "st-text"})
+    makers_div = soup.find("div", {"class": "st-text"})
     makers = []
     if makers_div:
         for a in makers_div.find_all("a"):
-            name = a.text.strip()
+            span = a.find("span")
+            if span:
+                span.extract()  # Remove the <span> so it doesn't pollute .text
+            name = a.text.strip().replace('\n', '')  # Clean linebreaks just in case
             href = a.get("href")
             if href:
                 makers.append((name, BASE_URL + href))
     return makers
+
 
 def parse_models(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -84,69 +126,96 @@ def parse_models(html):
                 model_name = a.find("strong").text.strip() if a.find("strong") else a.text.strip()
                 model_link = BASE_URL + a.get("href")
                 models.append((model_name, model_link))
+            else:
+                print("no a tag in" + makers_div.text)
+    else:
+        print("no makers div in" + soup.text)
     return models
+
 
 def parse_params(html, specific_params=None):
     params_dict = {}
     soup = BeautifulSoup(html, "html.parser")
     specs_table = soup.find('div', {"id": "specs-list"})
-    
+
     if specs_table:
         trs = specs_table.find_all("tr")
         for tr in trs:
-            spec_tag = tr.find("td", {"class": "ttl"})
             value_tag = tr.find("td", {"class": "nfo"})
-            if spec_tag and value_tag:
-                spec_name_tag = spec_tag.find("a")
-                if spec_name_tag:
-                    spec_name = spec_name_tag.get_text(strip=True)
-                    value = value_tag.get_text(separator=" ", strip=True)
-                    if (not specific_params) or (spec_name in specific_params):
-                        params_dict[spec_name] = value
-                        
+            if value_tag:
+                spec_name = value_tag.get('data-spec')
+                value = value_tag.get_text(separator=" ", strip=True)
+                if (not specific_params) or (spec_name in specific_params):
+                    params_dict[spec_name] = value
+            else:
+                print(tr.text + "is missing ttl and nfo")
+
     return params_dict
 
 
 def parse_esim(html):
     soup = BeautifulSoup(html, "html.parser")
-    sim_td = soup.find("td", {"data-spec": "sim", "class":"nfo"})
+    sim_td = soup.find("td", {"data-spec": "sim", "class": "nfo"})
     if sim_td:
-        return "esim" in sim_td.text.lower(), sim_td.contents
+        return "esim" in sim_td.text.lower(), sim_td.text.strip()
     return False, None
+
+
+def parse_os(html):
+    soup = BeautifulSoup(html, "html.parser")
+    os_td = soup.find("td", {"data-spec": "os", "class": "nfo"})
+    if os_td:
+        return "android" in os_td.text.lower(), os_td.text.strip()
+    return False, None
+
 
 def main():
     html_makers_table = fetch_url(MAKERS_URL)
     makers = parse_makers(html_makers_table)
 
-    # Open CSV for writing model data with headers
-    with open("gsmarena_models.csv", "w", newline="", encoding="utf-8") as csvfile:
-        writer = csv.writer(csvfile)
-        # Write header row to CSV
-        writer.writerow(["maker", "maker_link", "model_name", "model_link", "esim_support","sim_data", "source"])
+    print(f"Found {len(makers)} makers:")
+    for maker_name, maker_link in makers:
+        if any(sub in maker_name.lower() for sub in VENDORS_WHITELIST):
+            print(f"- {maker_name}: {maker_link}")
+            html_maker = fetch_url(maker_link)
+            models = parse_models(html_maker)
+            for model_name, model_link in models:
+                html_model = fetch_url(model_link)
+                esim_support, sim_data = parse_esim(html_model)
+                is_android, os_data = parse_os(html_model)
+                params = parse_params(html_model)
+                print(f"-- {model_name} | os: {os_data}")
 
-        print(f"Found {len(makers)} makers:")
-        for maker_name, maker_link in makers:
-            if any(sub in maker_name.lower() for sub in VENDORS_WHITELIST):
-                print(f"- {maker_name}: {maker_link}")
-                html_maker = fetch_url(maker_link)
-                models = parse_models(html_maker)
-                for model_name, model_link in models:
-                    html_model = fetch_url(model_link)
-                    esim_support, sim_data = parse_esim(html_model)
-                    params = parse_params(html_model)
-                    print(f"-- {model_name} | eSIM: {esim_support}")
+                # Generate a unique ID for this model
+                unique_model_id = str(uuid.uuid4())
 
-                    if esim_support:
-                        writer.writerow([
-                            maker_name,
-                            maker_link,
-                            model_name,
-                            model_link,
-                            esim_support,
-                            sim_data,
-                            "GSMARENA",  # Hardcoded source column
-                            params
-                        ])
+                # Save to models_view table
+                c.execute("""
+                    INSERT INTO models_view (
+                        unique_model_id, maker, maker_link,
+                        model_name, model_link, esim_support, sim_data,
+                        is_android, os_data
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    unique_model_id, maker_name, maker_link,
+                    model_name, model_link, int(esim_support), sim_data, int(is_android), os_data
+                ))
+
+                # Save parameters to models_params table
+                for param_name, param_value in params.items():
+                    c.execute("""
+                        INSERT INTO models_params (
+                            unique_model_id, maker, model_name,
+                            param_name, param_value
+                        ) VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        unique_model_id, maker_name, model_name,
+                        param_name, param_value
+                    ))
+
+                # Commit after each model to save progress
+                conn.commit()
+
 
 if __name__ == "__main__":
     main()
