@@ -1,3 +1,4 @@
+import random
 import time
 import requests
 import sqlite3
@@ -7,7 +8,8 @@ from stem import Signal
 from stem.control import Controller
 
 # Whitelist of specific vendors we're interested in
-VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel']
+# VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel', 'google', 'honor', 'htc','nothing', 'oppo', 'oneplus']
+VENDORS_WHITELIST = list('abcdefghijklmnopqrstuvwxyz')
 
 # Tor proxy and control port config
 SOCKS_PROXY = "socks5h://127.0.0.1:9050"
@@ -76,10 +78,10 @@ def renew_tor_identity():
         # Signal request for renewal of identity
         controller.signal(Signal.NEWNYM)
     print("New identity requested, waiting 10 seconds")
-    time.sleep(10)
+    time.sleep(15)
 
 
-def fetch_url(url, max_retries=10):
+def fetch_url(url, max_retries=50):
     for attempt in range(max_retries):
         try:
             print(f"Fetching {url} (Attempt {attempt})")
@@ -89,7 +91,7 @@ def fetch_url(url, max_retries=10):
                 renew_tor_identity()
                 continue
             response.raise_for_status()  # If any other error it will raise exception
-            time.sleep(1.5)  # random I chose for safety so that I won't get blocked frequently
+            time.sleep(random.randint(2,6))  # random I chose for safety so that I won't get blocked frequently
             return response.text
         except requests.RequestException as e:
             print(f"Request failed: {e}. Renewing identity and retrying")
