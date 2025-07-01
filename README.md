@@ -92,3 +92,7 @@ WHERE mv.is_android = 1
 ```sql
 SELECT DISTINCT param_name FROM models_params;
 ```
+
+## New! pivoted_data and pivoted_by_model Tables!
+pivoted_data has all the information for each model_name (Galaxy A12) with all its params.
+pivoted_by_model has all the information but split and duplicated by model (SM-A127F).
