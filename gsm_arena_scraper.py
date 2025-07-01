@@ -8,8 +8,8 @@ from stem import Signal
 from stem.control import Controller
 
 # Whitelist of specific vendors we're interested in
-# VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel', 'google', 'honor', 'htc','nothing', 'oppo', 'oneplus']
-VENDORS_WHITELIST = list('abcdefghijklmnopqrstuvwxyz')
+VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel', 'google', 'honor', 'htc','nothing', 'oppo', 'oneplus', 'vivo', 'nokia', 'sony','lg']
+# VENDORS_WHITELIST = list('abcdefghijklmnopqrstuvwxyz')
 
 # Tor proxy and control port config
 SOCKS_PROXY = "socks5h://127.0.0.1:9050"
@@ -77,7 +77,7 @@ def renew_tor_identity():
 
         # Signal request for renewal of identity
         controller.signal(Signal.NEWNYM)
-    print("New identity requested, waiting 10 seconds")
+    print("New identity requested, waiting 15 seconds")
     time.sleep(15)
 
 
@@ -91,7 +91,7 @@ def fetch_url(url, max_retries=50):
                 renew_tor_identity()
                 continue
             response.raise_for_status()  # If any other error it will raise exception
-            time.sleep(random.randint(2,6))  # random I chose for safety so that I won't get blocked frequently
+            time.sleep(random.randint(7,15))  # random I chose for safety so that I won't get blocked frequently
             return response.text
         except requests.RequestException as e:
             print(f"Request failed: {e}. Renewing identity and retrying")
@@ -107,8 +107,8 @@ def parse_makers(html):
         for a in makers_div.find_all("a"):
             span = a.find("span")
             if span:
-                span.extract()  # Remove the <span> so it doesn't pollute .text
-            name = a.text.strip().replace('\n', '')  # Clean linebreaks just in case
+                span.extract()
+            name = a.text.strip().replace('\n', '')
             href = a.get("href")
             if href:
                 makers.append((name, BASE_URL + href))
@@ -148,7 +148,7 @@ def parse_params(html, specific_params=None):
                 if (not specific_params) or (spec_name in specific_params):
                     params_dict[spec_name] = value
             else:
-                print(tr.text + "is missing ttl and nfo")
+                print(tr.text + " is missing ttl and nfo")
 
     return params_dict
 
@@ -177,45 +177,73 @@ def main():
     for maker_name, maker_link in makers:
         if any(sub in maker_name.lower() for sub in VENDORS_WHITELIST):
             print(f"- {maker_name}: {maker_link}")
-            html_maker = fetch_url(maker_link)
-            models = parse_models(html_maker)
-            for model_name, model_link in models:
-                html_model = fetch_url(model_link)
-                esim_support, sim_data = parse_esim(html_model)
-                is_android, os_data = parse_os(html_model)
-                params = parse_params(html_model)
-                print(f"-- {model_name} | os: {os_data}")
+            page_number = 1
+            while True:
+                if page_number == 1:
+                    url = maker_link
+                else:
+                    try:
+                        base = maker_link.split("-phones-")[0]
+                        vendor_id = maker_link.split("-phones-")[1].split(".php")[0]
+                        url = f"{base}-phones-f-{vendor_id}-0-p{page_number}.php"
+                    except Exception as e:
+                        print(f"Error parsing pagination link: {e}")
+                        break
 
-                # Generate a unique ID for this model
-                unique_model_id = str(uuid.uuid4())
+                try:
+                    html_maker = fetch_url(url)
+                except Exception as e:
+                    print(f"Failed to fetch {url}: {e}")
+                    break
 
-                # Save to models_view table
-                c.execute("""
-                    INSERT INTO models_view (
-                        unique_model_id, maker, maker_link,
-                        model_name, model_link, esim_support, sim_data,
-                        is_android, os_data
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    unique_model_id, maker_name, maker_link,
-                    model_name, model_link, int(esim_support), sim_data, int(is_android), os_data
-                ))
+                models = parse_models(html_maker)
+                if not models:
+                    print(f"  No models found on page {page_number}, stopping.")
+                    break
 
-                # Save parameters to models_params table
-                for param_name, param_value in params.items():
-                    c.execute("""
-                        INSERT INTO models_params (
-                            unique_model_id, maker, model_name,
-                            param_name, param_value
-                        ) VALUES (?, ?, ?, ?, ?)
-                    """, (
-                        unique_model_id, maker_name, model_name,
-                        param_name, param_value
-                    ))
+                print(f"  Page {page_number}: Found {len(models)} models")
+                for model_name, model_link in models:
+                    try:
+                        html_model = fetch_url(model_link)
+                        esim_support, sim_data = parse_esim(html_model)
+                        is_android, os_data = parse_os(html_model)
+                        params = parse_params(html_model)
+                        print(f"    -- {model_name} | os: {os_data}")
 
-                # Commit after each model to save progress
-                conn.commit()
+                        # Generate a unique ID for this model
+                        unique_model_id = str(uuid.uuid4())
 
+                        # Save to models_view table
+                        c.execute("""
+                            INSERT INTO models_view (
+                                unique_model_id, maker, maker_link,
+                                model_name, model_link, esim_support, sim_data,
+                                is_android, os_data
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            unique_model_id, maker_name, maker_link,
+                            model_name, model_link, int(esim_support), sim_data, int(is_android), os_data
+                        ))
+
+                        # Save parameters to models_params table
+                        for param_name, param_value in params.items():
+                            c.execute("""
+                                INSERT INTO models_params (
+                                    unique_model_id, maker, model_name,
+                                    param_name, param_value
+                                ) VALUES (?, ?, ?, ?, ?)
+                            """, (
+                                unique_model_id, maker_name, model_name,
+                                param_name, param_value
+                            ))
+
+                        # Commit after each model to save progress
+                        conn.commit()
+                    except Exception as e:
+                        print(f"    Error processing {model_link}: {e}")
+                        continue
+
+                page_number += 1
 
 if __name__ == "__main__":
     main()
