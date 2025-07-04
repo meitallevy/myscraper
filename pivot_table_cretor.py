@@ -1,7 +1,7 @@
 import sqlite3
 
 # Connect to the existing database
-conn = sqlite3.connect("gsmarena_full (copy).db")
+conn = sqlite3.connect("gsmarena_full_with_pivots.db")
 c = conn.cursor()
 
 # Get all distinct param_names from models_params
