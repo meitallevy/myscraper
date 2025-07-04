@@ -1,5 +1,7 @@
 import random
 import time
+from typing import List
+
 import requests
 import sqlite3
 import uuid
@@ -8,8 +10,8 @@ from stem import Signal
 from stem.control import Controller
 
 # Whitelist of specific vendors we're interested in
-VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel', 'google', 'honor', 'htc','nothing', 'oppo', 'oneplus', 'vivo', 'nokia', 'sony','lg']
-# VENDORS_WHITELIST = list('abcdefghijklmnopqrstuvwxyz')
+# VENDORS_WHITELIST = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'realme', 'blackview', 'itel', 'google', 'honor', 'htc','nothing', 'oppo', 'oneplus', 'vivo', 'nokia', 'sony','lg']
+VENDORS_WHITELIST = list('abcdefghijklmnopqrstuvwxyz')
 
 # Tor proxy and control port config
 SOCKS_PROXY = "socks5h://127.0.0.1:9050"
@@ -37,7 +39,7 @@ proxies = {
 }
 
 # SQLite DB setup (creates a file named gsmarena.db)
-conn = sqlite3.connect("gsmarena.db")
+conn = sqlite3.connect("gsmarena_full.db")
 c = conn.cursor()
 
 # Create main table for models
@@ -91,7 +93,7 @@ def fetch_url(url, max_retries=50):
                 renew_tor_identity()
                 continue
             response.raise_for_status()  # If any other error it will raise exception
-            time.sleep(random.randint(7,15))  # random I chose for safety so that I won't get blocked frequently
+            time.sleep(random.randint(10,17))  # random I chose for safety so that I won't get blocked frequently
             return response.text
         except requests.RequestException as e:
             print(f"Request failed: {e}. Renewing identity and retrying")
@@ -171,7 +173,9 @@ def parse_os(html):
 
 def main():
     html_makers_table = fetch_url(MAKERS_URL)
-    makers = parse_makers(html_makers_table)
+    priority_order = ['samsung', 'xiaomi', 'tecno', 'infinix', 'huawei', 'google', 'nokia', 'apple', 'oppo', 'oneplus']
+    # makers = sorted(, key=lambda x: priority_order.index(x) if x in priority_order else len(priority_order))
+    makers = sorted(parse_makers(html_makers_table), key=lambda x: priority_order.index(x[0]) if x[0] in priority_order else len(priority_order)+ 80)
 
     print(f"Found {len(makers)} makers:")
     for maker_name, maker_link in makers:

@@ -1,7 +1,7 @@
 import sqlite3
 
 # Connect to DB
-conn = sqlite3.connect("gsmarena.db")
+conn = sqlite3.connect("gsmarena_full (copy).db")
 conn.row_factory = sqlite3.Row
 c = conn.cursor()
 
